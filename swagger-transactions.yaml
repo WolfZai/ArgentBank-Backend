@@ -1,0 +1,426 @@
+openapi: 3.0.3
+info:
+  title: Argent Bank - API Transactions (Proposition)
+  description: |
+    Proposition de modélisation des routes API pour les **manipulations sur les transactions**,
+    destinée à la phase 2 du projet (document d'architecture).  
+    Cette spécification est **centrée sur les transactions** (lecture, filtrage, mise à jour, opérations courantes).
+    Elle suppose une authentification JWT préalable.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3001/api/v1
+    description: Serveur local de développement
+tags:
+  - name: Comptes
+    description: Opérations liées aux comptes (portée minimale pour lister l'id d'un compte)
+  - name: Transactions
+    description: Consultation, filtrage et modification des transactions
+
+paths:
+  /users/me/accounts:
+    get:
+      tags: [Comptes]
+      summary: Liste les comptes de l'utilisateur connecté
+      description: |
+        Retourne la liste des comptes pour identifier `accountId` avant de consulter les transactions.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Liste des comptes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Account'
+        '401':
+          description: Non authentifié
+        '500':
+          description: Erreur serveur
+
+  /accounts/{accountId}/transactions:
+    get:
+      tags: [Transactions]
+      summary: Liste les transactions d'un compte
+      description: |
+        Retourne les transactions d'un compte avec **filtres** (mois, intervalle de dates, catégorie, type crédit/débit),
+        **tri** et **pagination** pour couvrir les différents scénarios d'usage.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/Month'
+        - $ref: '#/components/parameters/FromDate'
+        - $ref: '#/components/parameters/ToDate'
+        - $ref: '#/components/parameters/Category'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/MinAmount'
+        - $ref: '#/components/parameters/MaxAmount'
+        - $ref: '#/components/parameters/SortBy'
+        - $ref: '#/components/parameters/SortOrder'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Liste paginée de transactions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionListResponse'
+        '400':
+          description: Paramètres de requête invalides (ex. bornes de dates incohérentes)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Non authentifié
+        '403':
+          description: Accès refusé à ce compte
+        '404':
+          description: Compte introuvable
+        '500':
+          description: Erreur serveur
+
+  /accounts/{accountId}/transactions/{transactionId}:
+    get:
+      tags: [Transactions]
+      summary: Détail d'une transaction
+      description: Retourne les informations complètes d'une transaction du compte.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/TransactionId'
+      responses:
+        '200':
+          description: Transaction trouvée
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Transaction'
+        '401':
+          description: Non authentifié
+        '403':
+          description: Accès refusé à ce compte
+        '404':
+          description: Transaction introuvable
+        '500':
+          description: Erreur serveur
+
+    patch:
+      tags: [Transactions]
+      summary: Met à jour une transaction (modifications autorisées)
+      description: |
+        Met à jour **partiellement** les champs modifiables d'une transaction :
+        - `category` (recatégorisation par l'utilisateur)
+        - `notes` (ajout d'une note libre)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/TransactionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionUpdate'
+            examples:
+              majCategorie:
+                summary: Mettre à jour la catégorie et la note
+                value:
+                  category: 'Food & Dining'
+                  notes: 'Déjeuner client – à refacturer'
+              rapprochement:
+                summary: Marquer comme rapprochée
+                value:
+                  status: 'cleared'
+      responses:
+        '200':
+          description: Transaction mise à jour
+          headers:
+            ETag:
+              description: ETag de la ressource mise à jour (contrôle de concurrence optimiste)
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Transaction'
+        '400':
+          description: Requête invalide (champs interdits ou valeurs non conformes)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Non authentifié
+        '403':
+          description: Accès refusé à ce compte
+        '404':
+          description: Transaction introuvable
+        '422':
+          description: Données valides au format mais non traitables (ex. catégorie inconnue)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Erreur serveur
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      description: Identifiant du compte
+      schema:
+        type: string
+        format: uuid
+      example: '5f8f8c44-2b1e-4b3a-9c9f-5b2a8e9d1a23'
+
+    TransactionId:
+      name: transactionId
+      in: path
+      required: true
+      description: Identifiant de la transaction
+      schema:
+        type: string
+        format: uuid
+      example: 'a0f9c7a0-2b71-4e1f-9f6e-1f5a1b9e2c11'
+
+    Month:
+      name: month
+      in: query
+      required: false
+      description: |
+        Filtre par **mois** au format `YYYY-MM` (ex. `2025-08`).
+        Exclusif avec `from`/`to`.
+      schema:
+        type: string
+        pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+      example: '2025-08'
+
+    FromDate:
+      name: from
+      in: query
+      required: false
+      description: Date de début (incluse) au format `YYYY-MM-DD`
+      schema:
+        type: string
+        format: date
+      example: '2025-08-01'
+
+    ToDate:
+      name: to
+      in: query
+      required: false
+      description: Date de fin (incluse) au format `YYYY-MM-DD`
+      schema:
+        type: string
+        format: date
+      example: '2025-08-31'
+
+    Category:
+      name: category
+      in: query
+      required: false
+      description: Filtre par catégorie utilisateur
+      schema:
+        type: string
+        example: 'Food & Dining'
+
+    Type:
+      name: type
+      in: query
+      required: false
+      description: Filtre par type de transaction
+      schema:
+        type: string
+        enum: [debit, credit]
+      example: 'debit'
+
+    MinAmount:
+      name: minAmount
+      in: query
+      required: false
+      description: Montant minimal en devise du compte
+      schema:
+        type: number
+        format: float
+      example: 10.0
+
+    MaxAmount:
+      name: maxAmount
+      in: query
+      required: false
+      description: Montant maximal en devise du compte
+      schema:
+        type: number
+        format: float
+      example: 200.0
+
+    SortBy:
+      name: sortBy
+      in: query
+      required: false
+      description: Champ de tri
+      schema:
+        type: string
+        enum: [date, amount, category]
+      example: 'date'
+
+    SortOrder:
+      name: sortOrder
+      in: query
+      required: false
+      description: Ordre de tri
+      schema:
+        type: string
+        enum: [asc, desc]
+      example: 'desc'
+
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Numéro de page (>= 1)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      description: Taille de page (1–200)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 25
+
+  schemas:
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: 'Argent Bank Checking (x8349)'
+        type:
+          type: string
+          example: 'checking'
+        currency:
+          type: string
+          example: 'EUR'
+        balance:
+          type: number
+          format: float
+          example: 2530.45
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 'a0f9c7a0-2b71-4e1f-9f6e-1f5a1b9e2c11'
+        accountId:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date-time
+          example: '2025-08-10T12:45:00Z'
+        description:
+          type: string
+          example: 'CB RESTAURANT PARIS 15'
+        amount:
+          type: number
+          format: float
+          example: -23.90
+        type:
+          type: string
+          enum: [debit, credit]
+          example: 'debit'
+        category:
+          type: string
+          example: 'Food & Dining'
+        notes:
+          type: string
+          example: 'Déjeuner client – à refacturer'
+        createdAt:
+          type: string
+          format: date-time
+
+    TransactionListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+        meta:
+          type: object
+          properties:
+            page:
+              type: integer
+              example: 1
+            pageSize:
+              type: integer
+              example: 25
+            totalItems:
+              type: integer
+              example: 127
+            totalPages:
+              type: integer
+              example: 6
+
+    TransactionUpdate:
+      type: object
+      description: Champs modifiables d'une transaction
+      properties:
+        category:
+          type: string
+          example: 'Transport'
+        notes:
+          type: string
+          example: 'Trajet client – non facturé'
+      additionalProperties: false
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          example: 'BAD_REQUEST'
+        message:
+          type: string
+          example: 'Paramètre "month" invalide, attendu YYYY-MM'
+        details:
+          type: object
+          additionalProperties: true
+security:
+  - bearerAuth: []
